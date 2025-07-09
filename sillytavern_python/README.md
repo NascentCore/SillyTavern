@@ -6,7 +6,7 @@
 
 **这部分是 @yaxiong 手写**
 
-第一步让 cursor 描述相关组件
+第一步让 cursor 描述相关组件，第一步结果在[chat_system_analysis.md](../chat_system_analysis.md)。
 
 ```text
 描述一下本系统中，聊天的后端系统机制如何工作，描述角色卡片信息如何被插入到大模型提示词中，以及这个插入机制当中的 high level 结构和关键设计
