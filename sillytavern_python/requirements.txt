@@ -1,0 +1,47 @@
+# SillyTavern Python版本依赖
+
+# 异步HTTP客户端
+aiohttp>=3.8.0
+
+# 数据处理
+dataclasses-json>=0.5.0
+
+# 类型提示支持
+typing-extensions>=4.0.0
+
+# 日志格式化
+colorlog>=6.0.0
+
+# 环境变量管理
+python-dotenv>=0.19.0
+
+# JSON处理增强
+orjson>=3.6.0
+
+# 正则表达式增强
+regex>=2022.0.0
+
+# 模板引擎（可选，用于更复杂的模板处理）
+jinja2>=3.0.0
+
+# 配置管理
+pydantic>=1.10.0
+
+# 异步任务队列（可选）
+celery>=5.2.0
+
+# 数据库支持（可选）
+sqlalchemy>=1.4.0
+alembic>=1.7.0
+
+# 缓存支持（可选）
+redis>=4.0.0
+
+# 测试框架
+pytest>=7.0.0
+pytest-asyncio>=0.20.0
+
+# 代码质量
+black>=22.0.0
+flake8>=4.0.0
+mypy>=0.950 
