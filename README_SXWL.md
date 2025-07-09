@@ -8,7 +8,7 @@ Create `.env` and set `GEMINI_API_KEY=...`
 
 Configure LLM APIs
 
-![image](https://github.com/user-attachments/assets/5d0547c8-9a6f-468c-aa7f-c6f4c83a235d)
+![image](https://github.com/user-attachments/assets/28fb0124-0f19-419e-9a62-185732e3ab52)
 
 ## References
 
