@@ -2,6 +2,22 @@
 
 这是 SillyTavern 的 Python 重写版本，实现了角色卡片信息插入机制和聊天后端系统。
 
+## Cursor Prompts
+
+**这部分是 @yaxiong 手写**
+
+第一步让 cursor 描述相关组件
+
+```text
+描述一下本系统中，聊天的后端系统机制如何工作，描述角色卡片信息如何被插入到大模型提示词中，以及这个插入机制当中的 high level 结构和关键设计
+```
+
+第二步，让 cursor 改写为 Python
+
+```text
+把这部分代码改写为 python
+```
+
 ## 功能特性
 
 ### 1. 角色卡片系统 (`character_system.py`)
