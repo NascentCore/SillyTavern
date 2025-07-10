@@ -4,8 +4,6 @@ Used for finetune chat agent through comprehensive knobs offered by ST
 
 ## Get Started
 
-Create `.env` and set `GEMINI_API_KEY=...`
-
 Configure OpenRouter provider in LLM APIs
 
 * API Key: Ask @Yaxiong @Cairong
