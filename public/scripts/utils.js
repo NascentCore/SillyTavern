@@ -3,10 +3,11 @@ import {
     DOMPurify,
     Readability,
     isProbablyReaderable,
+    lodash,
 } from '../lib.js';
 
 import { getContext } from './extensions.js';
-import { characters, getRequestHeaders, this_chid, user_avatar } from '../script.js';
+import { characters, getRequestHeaders, processDroppedFiles, this_chid, user_avatar } from '../script.js';
 import { isMobile } from './RossAscends-mods.js';
 import { collapseNewlines, power_user } from './power-user.js';
 import { debounce_timeout } from './constants.js';
@@ -15,6 +16,10 @@ import { SlashCommandClosure } from './slash-commands/SlashCommandClosure.js';
 import { getTagsList } from './tags.js';
 import { groups, selected_group } from './group-chats.js';
 import { getCurrentLocale, t } from './i18n.js';
+import { importWorldInfo } from './world-info.js';
+
+export const shiftUpByOne = (e, i, a) => a[i] = e + 1;
+export const shiftDownByOne = (e, i, a) => a[i] = e - 1;
 
 /**
  * Pagination status string template.
@@ -25,6 +30,8 @@ export const PAGINATION_TEMPLATE = '<%= rangeStart %>-<%= rangeEnd %> .. <%= tot
 export const localizePagination = function(container) {
     container.find('[title="Next page"]').attr('title', t`Next page`);
     container.find('[title="Previous page"]').attr('title', t`Previous page`);
+    container.find('[title="First page"]').attr('title', t`First page`);
+    container.find('[title="Last page"]').attr('title', t`Last page`);
 };
 
 /**
@@ -100,6 +107,19 @@ export function deepMerge(target, source) {
         });
     }
     return output;
+}
+
+/**
+ * Ensures that the provided object is a plain object.
+ * @param {object} obj Object to ensure is a plain object
+ * @return {object} A plain object, or an empty object if the input is not an object.
+ */
+export function ensurePlainObject(obj) {
+    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+        return {};
+    }
+
+    return obj;
 }
 
 export function escapeHtml(str) {
@@ -269,6 +289,15 @@ export function removeFromArray(array, item) {
     if (index === -1) return false;
     array.splice(index, 1);
     return true;
+}
+
+/**
+ * Normalizes an array by removing duplicates, trimming strings, and filtering out empty values.
+ * @param {any[]} arr - The array to normalize.
+ * @returns {any[]} The normalized array.
+ */
+export function normalizeArray(arr) {
+    return [...new Set((arr ?? []).map(s => typeof s === 'string' ? s.trim() : s).filter(Boolean))];
 }
 
 /**
@@ -603,7 +632,7 @@ export function isElementInViewport(el) {
 /**
  * Returns a name that is unique among the names that exist.
  * @param {string} name The name to check.
- * @param {{ (y: any): boolean; }} exists Function to check if name exists.
+ * @param {{ (name: string): boolean; }} exists Function to check if name exists.
  * @returns {string} A unique name.
  */
 export function getUniqueName(name, exists) {
@@ -1410,32 +1439,27 @@ export async function getSanitizedFilename(fileName) {
  * Sends a base64 encoded image to the backend to be saved as a file.
  *
  * @param {string} base64Data - The base64 encoded image data.
- * @param {string} characterName - The character name to determine the sub-directory for saving.
- * @param {string} ext - The file extension for the image (e.g., 'jpg', 'png', 'webp').
+ * @param {string} subFolder - The character name to determine the sub-directory for saving.
+ * @param {string} fileName - The name of the file to save the image as (without extension).
+ * @param {string} extension - The file extension for the image (e.g., 'jpg', 'png', 'webp').
  *
  * @returns {Promise<string>} - Resolves to the saved image's path on the server.
  *                              Rejects with an error if the upload fails.
  */
-export async function saveBase64AsFile(base64Data, characterName, filename = '', ext) {
-    // Construct the full data URL
-    const format = ext; // Extract the file extension (jpg, png, webp)
-    const dataURL = `data:image/${format};base64,${base64Data}`;
-
+export async function saveBase64AsFile(base64Data, subFolder, fileName, extension) {
     // Prepare the request body
     const requestBody = {
-        image: dataURL,
-        ch_name: characterName,
-        filename: String(filename).replace(/\./g, '_'),
+        image: base64Data,
+        format: extension,
+        ch_name: subFolder,
+        filename: String(fileName).replace(/\./g, '_'),
     };
 
     // Send the data URL to your backend using fetch
     const response = await fetch('/api/images/upload', {
         method: 'POST',
+        headers: getRequestHeaders(),
         body: JSON.stringify(requestBody),
-        headers: {
-            ...getRequestHeaders(),
-            'Content-Type': 'application/json',
-        },
     });
 
     // If the response is successful, get the saved image path from the server's response
@@ -1446,6 +1470,40 @@ export async function saveBase64AsFile(base64Data, characterName, filename = '',
         const errorData = await response.json();
         throw new Error(errorData.error || 'Failed to upload the image to the server');
     }
+}
+
+/**
+ * Gets the file extension from a File object.
+ * @param {File} file The file to get the extension from
+ * @returns {string} The file extension of the given file
+ */
+export function getFileExtension(file) {
+    return file.name.substring((file.name.lastIndexOf('.') + file.name.length) % file.name.length + 1).toLowerCase().trim();
+}
+
+/**
+ * Converts UTF-8 string into Base64-encoded string.
+ *
+ * @param {string} text The UTF-8 string
+ * @returns {string} The Base64-encoded string
+ */
+export function convertTextToBase64(text) {
+    const encoder = new TextEncoder();
+    const utf8Bytes = encoder.encode(text);
+    /**
+     * return `true` if `Uint8Array.prototype.toBase64` function is supported.
+     * @see {@link https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array/toBase64|MDN Reference}
+     */
+    if ('toBase64' in Uint8Array.prototype) {
+        return utf8Bytes.toBase64();
+    }
+    // Creates binary string, where each character's code point directly matches the byte value (0-255).
+    let binaryString = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < utf8Bytes.length; i += chunkSize) {
+        binaryString += String.fromCharCode(...utf8Bytes.subarray(i, i + chunkSize));
+    }
+    return window.btoa(binaryString);
 }
 
 /**
@@ -1554,15 +1612,25 @@ export function createThumbnail(dataUrl, maxWidth = null, maxHeight = null, type
                 maxHeight = img.height;
             }
 
-            if (img.width > img.height) {
-                thumbnailHeight = maxWidth / aspectRatio;
+            // Do not upscale if image is already smaller than max dimensions
+            if (img.width <= maxWidth && img.height <= maxHeight) {
+                thumbnailWidth = img.width;
+                thumbnailHeight = img.height;
             } else {
-                thumbnailWidth = maxHeight * aspectRatio;
+                if (img.width > img.height) {
+                    thumbnailHeight = maxWidth / aspectRatio;
+                } else {
+                    thumbnailWidth = maxHeight * aspectRatio;
+                }
             }
 
             // Set the canvas dimensions and draw the resized image
             canvas.width = thumbnailWidth;
             canvas.height = thumbnailHeight;
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, thumbnailWidth, thumbnailHeight);
             ctx.drawImage(img, 0, 0, thumbnailWidth, thumbnailHeight);
 
             // Convert the canvas to a data URL and resolve the promise
@@ -1581,13 +1649,18 @@ export function createThumbnail(dataUrl, maxWidth = null, maxHeight = null, type
  * @param {{ (): boolean; }} condition The condition to wait for.
  * @param {number} [timeout=1000] The timeout in milliseconds.
  * @param {number} [interval=100] The interval in milliseconds.
+ * @param {object} [options] Options object
+ * @param {boolean} [options.rejectOnTimeout=true] Whether to reject the promise on timeout or resolve it.
  * @returns {Promise<void>} A promise that resolves when the condition is true.
  */
-export async function waitUntilCondition(condition, timeout = 1000, interval = 100) {
+export async function waitUntilCondition(condition, timeout = 1000, interval = 100, options = {}) {
+    const { rejectOnTimeout = true } = options;
+
     return new Promise((resolve, reject) => {
         const timeoutId = setTimeout(() => {
             clearInterval(intervalId);
-            reject(new Error('Timed out waiting for condition to be true'));
+            const timeoutFn = rejectOnTimeout ? reject : resolve;
+            timeoutFn(new Error('Timed out waiting for condition to be true'));
         }, timeout);
 
         const intervalId = setInterval(() => {
@@ -2446,5 +2519,172 @@ export function clearInfoBlock(target) {
     if (infoBlock && infoBlock.classList.contains('info-block')) {
         infoBlock.className = '';
         infoBlock.innerHTML = '';
+    }
+}
+
+/**
+ * Provides a matcher function for select2 that matches both the text and value of options.
+ * @param {import('select2').SearchOptions} params
+ * @param {import('select2').OptGroupData|import('select2').OptionData} data
+ * @return {import('select2').OptGroupData|import('select2').OptionData|null}
+ */
+export function textValueMatcher(params, data) {
+    // Always return the object if there is nothing to compare
+    if (params.term == null || params.term.trim() === '') {
+        return data;
+    }
+
+    // Do a recursive check for options with children
+    if (data.children && data.children.length > 0) {
+        // Clone the data object if there are children
+        // This is required as we modify the object to remove any non-matches
+        const match = $.extend(true, {}, data);
+
+        // Check each child of the option
+        for (let c = data.children.length - 1; c >= 0; c--) {
+            const child = data.children[c];
+
+            const matches = textValueMatcher(params, child);
+
+            // If there wasn't a match, remove the object in the array
+            if (matches == null) {
+                match.children.splice(c, 1);
+            }
+        }
+
+        // If any children matched, return the new object
+        if (match.children.length > 0) {
+            return match;
+        }
+
+        // If there were no matching children, check just the plain object
+        return textValueMatcher(params, match);
+    }
+
+    const textMatch = compareIgnoreCaseAndAccents(data.text, params.term, (a, b) => a.indexOf(b) > -1);
+    const valueMatch = data.element instanceof HTMLOptionElement && compareIgnoreCaseAndAccents(data.element.value, params.term, (a, b) => a.indexOf(b) > -1);
+
+    if (textMatch || valueMatch) {
+        return data;
+    }
+
+    // If it doesn't contain the term, don't return anything
+    return null;
+}
+
+/**
+ * Compares two version numbers, returning true if srcVersion >= minVersion
+ * @param {string} srcVersion The current version.
+ * @param {string} minVersion The target version number to test against
+ * @returns {boolean} True if srcVersion >= minVersion, false if not
+ */
+export function versionCompare(srcVersion, minVersion) {
+    return (srcVersion || '0.0.0').localeCompare(minVersion, undefined, { numeric: true, sensitivity: 'base' }) > -1;
+}
+
+/**
+ * Sets up the scroll-to-top button functionality.
+ * @param {object} params Parameters object
+ * @param {string} params.scrollContainerId Scrollable container element ID
+ * @param {string} params.buttonId Button element ID
+ * @param {string} params.drawerId Drawer element ID
+ * @param {number} [params.visibilityThreshold] Scroll position (px) to show the button (default: 300)
+ * @returns {() => void} Cleanup function to remove event listeners
+ */
+export function setupScrollToTop({ scrollContainerId, buttonId, drawerId, visibilityThreshold = 300 }) {
+    const scrollContainer = document.getElementById(scrollContainerId);
+    const btn = document.getElementById(buttonId);
+    const drawer = document.getElementById(drawerId);
+
+    if (!btn || !drawer) {
+        // Not fatal; the drawer or button may not exist in some builds. Use debug level.
+        console.debug('Scroll-to-top: button or drawer not found during setup.');
+        return () => { /* noop cleanup */ };
+    }
+
+    if (!scrollContainer) {
+        console.debug('Scroll-to-top: scroll container not found during setup.');
+        return () => { /* noop cleanup */ };
+    }
+
+    const updateButtonVisibility = () => btn.classList.toggle('visible', scrollContainer.scrollTop > visibilityThreshold);
+    const updateButtonVisibilityThrottled = lodash.throttle(updateButtonVisibility, debounce_timeout.standard, { leading: true, trailing: true });
+    const onScroll = () => updateButtonVisibilityThrottled();
+    scrollContainer.addEventListener('scroll', onScroll, { passive: true });
+
+    // Scroll to top on click (button semantics provide keyboard activation natively)
+    const onActivate = (/** @type {MouseEvent} */ e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const userPrefersReduced = power_user.reduced_motion;
+        scrollContainer.scrollTo({ top: 0, behavior: userPrefersReduced ? 'auto' : 'smooth' });
+    };
+    btn.addEventListener('click', onActivate);
+
+    // Initial state check
+    updateButtonVisibility();
+
+    // Return cleanup function for caller to hold and invoke when appropriate
+    return () => {
+        scrollContainer.removeEventListener('scroll', onScroll);
+        btn.removeEventListener('click', onActivate);
+    };
+}
+
+/**
+ * Imports content from an external URL.
+ * @param {string} url URL or UUID of the content to import.
+ * @param {Object} [options={}] Options object.
+ * @param {string|null} [options.preserveFileName=null] Optional file name to use for the imported content.
+ * @returns {Promise<void>} A promise that resolves when the import is complete.
+ */
+export async function importFromExternalUrl(url, { preserveFileName = null } = {}) {
+    let request;
+
+    if (isValidUrl(url)) {
+        console.debug('Custom content import started for URL: ', url);
+        request = await fetch('/api/content/importURL', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ url }),
+        });
+    } else {
+        console.debug('Custom content import started for Char UUID: ', url);
+        request = await fetch('/api/content/importUUID', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ url }),
+        });
+    }
+
+    if (!request.ok) {
+        toastr.info(request.statusText, 'Custom content import failed');
+        console.error('Custom content import failed', request.status, request.statusText);
+        return;
+    }
+
+    const data = await request.blob();
+    const customContentType = request.headers.get('X-Custom-Content-Type');
+    let fileName = request.headers.get('Content-Disposition').split('filename=')[1].replace(/"/g, '');
+    const file = new File([data], fileName, { type: data.type });
+
+    const extraData = new Map();
+    if (preserveFileName) {
+        fileName = preserveFileName;
+        extraData.set(file, preserveFileName);
+    }
+
+    switch (customContentType) {
+        case 'character':
+            await processDroppedFiles([file], extraData);
+            break;
+        case 'lorebook':
+            await importWorldInfo(file);
+            break;
+        default:
+            toastr.warning('Unknown content type');
+            console.error('Unknown content type', customContentType);
+            break;
     }
 }
